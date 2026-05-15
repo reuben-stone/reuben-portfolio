@@ -55,9 +55,9 @@ float shipSDF(vec2 p) {
 // Render ship as billboard — returns vec4(color, mask)
 // ro = camera origin, rd = ray direction
 vec4 renderShip(vec3 ro, vec3 rd, float time) {
-  // Ship position in world space
+  // Ship position in world space — in the moonlight column
   float shipZ = -250.0;
-  float shipX = -5.0;
+  float shipX = 8.0;
 
   // Ray-plane intersection at z = shipZ
   if (rd.z > -0.001) return vec4(0.0); // facing away
@@ -66,9 +66,12 @@ vec4 renderShip(vec3 ro, vec3 rd, float time) {
 
   vec3 hitPoint = ro + rd * t;
 
-  // Local coordinates on the billboard
+  // Local coordinates on the billboard — ship hull sits on waterline
   float shipScale = 3.5;
-  vec2 localP = vec2(hitPoint.x - shipX, hitPoint.y) / shipScale;
+  float waterline = ro.y; // ocean surface is at camera height
+  vec2 localP = vec2(hitPoint.x - shipX, hitPoint.y - waterline) / shipScale;
+  // Shift so hull bottom (y≈-0.17 in SDF) aligns with waterline
+  localP.y += 0.17;
 
   // Early out
   if (abs(localP.x) > 1.5 || localP.y < -0.5 || localP.y > 1.5) return vec4(0.0);
@@ -96,7 +99,7 @@ vec4 renderShip(vec3 ro, vec3 rd, float time) {
 
 // Lantern glow on nearby water — returns warm colour contribution
 vec3 shipLanternReflection(vec2 hitXZ, float time) {
-  vec2 lanternWorld = vec2(-5.0 - 0.35 * 3.5, -250.0);
+  vec2 lanternWorld = vec2(8.0 - 0.35 * 3.5, -250.0);
   float dist = length(hitXZ - lanternWorld);
   float flicker = 0.8 + 0.2 * sin(time * 3.7 + sin(time * 7.1) * 0.5);
   float glow = exp(-dist * dist / 80.0) * 0.015 * flicker;

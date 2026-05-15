@@ -105,10 +105,13 @@ vec3 sky(vec3 rd, float time) {
   float y = max(rd.y, 0.0);
   float moonDot = max(dot(rd, MOON_DIR), 0.0);
 
-  // Night sky gradient
+  // Night sky gradient with depth variation
   vec3 col = mix(SKY_HORIZON, SKY_MID, pow(y, 0.12));
   col = mix(col, SKY_ZENITH, pow(y, 0.4));
   col += vec3(0.02, 0.03, 0.06) * pow(moonDot, 1.5);
+  // Subtle noise-based variation in the deep sky — breaks up flat blue
+  float skyNoise = noise3D(rd * 3.0) * 0.5 + noise3D(rd * 7.0) * 0.3;
+  col += vec3(0.005, 0.008, 0.018) * skyNoise * pow(y, 0.3);
 
   // --- Nebula background — texture-based deep sky tones ---
   float nebPhi = atan(rd.z, rd.x);
@@ -117,8 +120,10 @@ vec3 sky(vec3 rd, float time) {
   vec3 nebCol = texture2D(uNebula, nebUv).rgb;
   float nebLuma = dot(nebCol, vec3(0.2126, 0.7152, 0.0722));
   nebCol = mix(vec3(nebLuma), nebCol, 0.6);
-  float nebMask = smoothstep(0.03, 0.25, y);
-  col += nebCol * nebMask * 0.20;
+  // Stronger at zenith, fading toward horizon
+  float nebMask = smoothstep(0.03, 0.20, y);
+  float zenithBoost = smoothstep(0.15, 0.5, y) * 0.5 + 0.5;
+  col += nebCol * nebMask * zenithBoost * 0.22;
 
   // --- Real star catalogue (computed here, added after clouds with occlusion) ---
   float starMask = smoothstep(0.02, 0.10, y);

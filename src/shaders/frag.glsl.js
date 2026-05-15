@@ -45,7 +45,7 @@ void main() {
   float heave = sin(sway * 0.6 + 0.5) * heaveAmt + sin(sway * 1.0) * heaveAmt * 0.3;
 
   vec3 ro = vec3(0.0, 10.0 + heave, 0.0);
-  vec3 target = vec3(2.0, 11.5, -40.0);
+  vec3 target = vec3(2.0, 10.8, -40.0);
   vec3 fwd = normalize(target - ro);
   vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
   vec3 up = cross(right, fwd);
@@ -121,6 +121,16 @@ void main() {
     // Dancing sparkle from wave normals
     float sparkle = pow(NdotH, 500.0);
     water += MOON_COLOR * sparkle * 2.0;
+
+    // Star reflections on water — gentle, using mostly-flat normal
+    float starReflFade = smoothstep(250.0, 50.0, dist);
+    if (starReflFade > 0.01) {
+      // Very gentle normal — mostly up, just a hint of wave
+      vec3 calmN = normalize(mix(vec3(0.0, 1.0, 0.0), N, 0.05));
+      vec3 calmR = reflect(-V, calmN);
+      vec3 starRefl = renderStars(calmR, uTime);
+      water += starRefl * starReflFade * 0.3;
+    }
 
     // Ship lantern warm glow on water
     water += shipLanternReflection(hit.xz, uTime);

@@ -58,12 +58,26 @@ vec4 renderHeadland(vec3 rd) {
   // Moonlit edge highlights — approximate surface normal from profile gradient
   float eps = 0.003;
   float dProfile = headlandProfile(xAngle + eps) - headlandProfile(xAngle - eps);
-  // Edge glow on the top contour
+
+  // Rock face illumination — moon-facing slopes get faint light
+  float moonFacing = smoothstep(0.0, 0.12, -dProfile);
+  // How far below the ridgeline — upper parts catch more light
+  float heightInRock = 1.0 - smoothstep(0.0, profile, profile - rd.y);
+  // Rock texture noise for variation
+  float rockTex = fbm(vec2(xAngle * 80.0, rd.y * 300.0)) * 0.6 + 0.4;
+  float rockLight = moonFacing * heightInRock * rockTex;
+  col += MOON_COLOR * 0.06 * rockLight;
+
+  // Edge glow on the top contour — bright silver rim
   float edgeDist = rd.y - profile + 0.004;
-  float edgeLight = smoothstep(0.0, 0.004, edgeDist) * smoothstep(0.008, 0.004, edgeDist);
-  // Left-facing slopes catch more moonlight (moon is near center)
-  float moonFacing = smoothstep(0.0, 0.15, -dProfile);
-  col += MOON_COLOR * 0.04 * edgeLight * (0.3 + 0.7 * moonFacing);
+  float edgeLight = smoothstep(0.0, 0.003, edgeDist) * smoothstep(0.007, 0.003, edgeDist);
+  col += MOON_COLOR * 0.08 * edgeLight * (0.3 + 0.7 * moonFacing);
+
+  // Base sea-spray mist — faint glow at waterline
+  float baseMist = smoothstep(0.008, 0.0, rd.y) * smoothstep(-0.002, 0.002, rd.y);
+  float mistNoise = noise(vec2(xAngle * 30.0, rd.y * 200.0));
+  baseMist *= smoothstep(0.3, 0.6, mistNoise);
+  col += vec3(0.04, 0.05, 0.07) * baseMist * smoothstep(0.32, 0.45, xAngle);
 
   // Atmospheric haze — distant land is slightly blue-hazed
   float hazeFade = smoothstep(0.005, 0.0, rd.y - profile + 0.005);
