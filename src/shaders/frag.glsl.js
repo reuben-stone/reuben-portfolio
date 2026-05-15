@@ -7,12 +7,15 @@ import noiseGlsl from "./noise.glsl.js";
 import starsGlsl from "../stars/stars.glsl.js";
 import cloudsGlsl from "../sky/clouds.glsl.js";
 import skyGlsl from "../sky/sky.glsl.js";
+import headlandGlsl from "../headland/headland.glsl.js";
+import shipGlsl from "../ship/distant-ship.glsl.js";
 import oceanGlsl from "../ocean/ocean.glsl.js";
 export default /* glsl */ `
 precision highp float;
 
 uniform float uTime;
 uniform vec2 uResolution;
+uniform sampler2D uNebula;
 
 varying vec2 vUv;
 
@@ -24,6 +27,8 @@ ${noiseGlsl}
 ${starsGlsl}
 ${cloudsGlsl}
 ${skyGlsl}
+${headlandGlsl}
+${shipGlsl}
 ${oceanGlsl}
 
 void main() {
@@ -50,12 +55,24 @@ void main() {
 
   vec3 col = sky(rd, uTime);
 
-  // Horizon definition — subtle darkening right at rd.y ≈ 0 (perfectly straight)
-  float horizonDark = exp(-rd.y * rd.y / 0.00003);
-  col *= 1.0 - horizonDark * 0.12;
+  // Horizon definition — very subtle darkening at rd.y ≈ 0
+  float horizonDark = exp(-rd.y * rd.y / 0.0002);
+  col *= 1.0 - horizonDark * 0.05;
+
+  // Rocky headland (right side)
+  vec4 headland = renderHeadland(rd);
+  if (headland.a > 0.01) {
+    col = mix(col, headland.rgb, headland.a);
+  }
+
+  // Distant ship silhouette (above waterline)
+  vec4 ship = renderShip(ro, rd, uTime);
+  if (ship.a > 0.01) {
+    col = mix(col, ship.rgb, ship.a);
+  }
 
   // Ray-ocean intersection
-  if (rd.y < 0.0) {
+  if (rd.y < 0.0 && headland.a < 0.99) {
     float t = -ro.y / rd.y;
     vec3 hit = ro + rd * t;
 
@@ -70,18 +87,30 @@ void main() {
     float fresnelMin = mix(0.04, 0.15, smoothstep(10.0, 80.0, dist));
     fresnel = mix(fresnelMin, 0.90, fresnel);
 
-    // Water colour — moonlit ocean
+    // Water colour — moonlit ocean with depth
     float NdotL = max(dot(N, MOON_DIR), 0.0);
     vec3 waterCol = mix(DEEP, SHALLOW, pow(NdotV, 0.25));
-    // Moonlit brightening on wave faces
-    waterCol += MOON_COLOR * 0.06 * NdotL;
-    // Wave height darkening
+    // Distance-based colour shift — nearer water shows more teal, distant goes deep
+    float nearFade = smoothstep(300.0, 20.0, dist);
+    waterCol = mix(waterCol, vec3(0.03, 0.06, 0.12), nearFade * 0.3);
+    // Moonlit brightening on wave faces — stronger for nearby waves
+    waterCol += MOON_COLOR * (0.06 + nearFade * 0.04) * NdotL;
+    // Subsurface scatter hint — moonlight through wave crests
+    float sss = pow(max(dot(rd, MOON_DIR), 0.0), 6.0) * max(waveH, 0.0);
+    waterCol += vec3(0.02, 0.04, 0.06) * sss * nearFade;
+    // Wave height variation — troughs darker, crests slightly brighter
     float heightDarken = smoothstep(0.3, -0.3, waveH);
-    waterCol = mix(waterCol, DEEP * 0.7, heightDarken * 0.2);
+    waterCol = mix(waterCol, DEEP * 0.6, heightDarken * 0.25);
+    float heightBright = smoothstep(-0.1, 0.4, waveH);
+    waterCol += MOON_COLOR * 0.015 * heightBright * nearFade;
 
     // Reflection — dominant at night (dark water = high Fresnel)
     vec3 R = reflect(-V, N);
-    vec3 water = mix(waterCol, skyReflect(R, uTime), fresnel);
+    vec3 reflSky = skyReflect(R, uTime);
+    // Headland darkens reflection where it would appear
+    vec4 headRefl = renderHeadland(R);
+    reflSky = mix(reflSky, headRefl.rgb, headRefl.a);
+    vec3 water = mix(waterCol, reflSky, fresnel);
 
     // Moon specular — silver dancing column
     vec3 H = normalize(MOON_DIR + V);
@@ -92,6 +121,9 @@ void main() {
     // Dancing sparkle from wave normals
     float sparkle = pow(NdotH, 500.0);
     water += MOON_COLOR * sparkle * 2.0;
+
+    // Ship lantern warm glow on water
+    water += shipLanternReflection(hit.xz, uTime);
 
     // Foam — silver-grey at night
     float foam = oceanFoam(hit.xz, uTime);
@@ -106,10 +138,17 @@ void main() {
     vec3 horizonTint = SKY_HORIZON;
     water = mix(water, horizonTint, atmoDist * 0.40);
 
-    // Horizon fog — blend to night sky at distance
-    float fog = smoothstep(350.0, 1200.0, dist);
-    vec3 horizonSky = skyReflect(normalize(vec3(rd.x, max(rd.y, 0.0) + 0.005, rd.z)), uTime);
+    // Horizon fog — blend to night sky at distance (skyReflect includes moon bloom)
+    float fog = smoothstep(400.0, 1400.0, dist);
+    vec3 horizonSky = skyReflect(normalize(vec3(rd.x, max(rd.y, 0.0) + 0.003, rd.z)), uTime);
     water = mix(water, horizonSky, fog);
+
+    // Moon path glow — after fog, so it reaches the horizon
+    float moonAlign = pow(max(dot(normalize(hit.xz), normalize(MOON_DIR.xz)), 0.0), 6.0);
+    float pathGlow = moonAlign * smoothstep(50.0, 400.0, dist) * 0.06;
+    float widePath = pow(max(dot(normalize(hit.xz), normalize(MOON_DIR.xz)), 0.0), 2.5)
+                   * smoothstep(100.0, 600.0, dist) * 0.03;
+    water += MOON_COLOR * (pathGlow + widePath);
 
     col = water;
   }

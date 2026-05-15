@@ -110,6 +110,16 @@ vec3 sky(vec3 rd, float time) {
   col = mix(col, SKY_ZENITH, pow(y, 0.4));
   col += vec3(0.02, 0.03, 0.06) * pow(moonDot, 1.5);
 
+  // --- Nebula background — texture-based deep sky tones ---
+  float nebPhi = atan(rd.z, rd.x);
+  float nebTheta = acos(clamp(rd.y, -1.0, 1.0));
+  vec2 nebUv = vec2(nebPhi * 0.3 + 0.5, nebTheta * 0.5);
+  vec3 nebCol = texture2D(uNebula, nebUv).rgb;
+  float nebLuma = dot(nebCol, vec3(0.2126, 0.7152, 0.0722));
+  nebCol = mix(vec3(nebLuma), nebCol, 0.6);
+  float nebMask = smoothstep(0.03, 0.25, y);
+  col += nebCol * nebMask * 0.20;
+
   // --- Real star catalogue (computed here, added after clouds with occlusion) ---
   float starMask = smoothstep(0.02, 0.10, y);
   float moonGlare = 1.0 - smoothstep(0.05, 0.25, acos(clamp(moonDot, 0.0, 1.0)));
@@ -165,6 +175,16 @@ vec3 sky(vec3 rd, float time) {
   float veil = pow(moonDot, 5.0);
   col = mix(col, vec3(0.18, 0.22, 0.32), veil * 0.08);
 
+  // --- Ethereal horizon haze with variation ---
+  float hazeY = y;
+  float haze = exp(-hazeY * hazeY / 0.0008);
+  float hazeMoonBias = 1.0 + pow(moonDot, 3.0) * 0.5;
+  // Break up the haze band with noise so it's not a flat stripe
+  float hazeNoise = noise3D(rd * 8.0 + vec3(time * 0.02)) * 0.4 + 0.8;
+  haze *= hazeNoise;
+  vec3 hazeCol = mix(SKY_HORIZON, MOON_COLOR * 0.15, 0.3) * hazeMoonBias;
+  col = mix(col, hazeCol, haze * 0.15);
+
   return max(col, vec3(0.0));
 }
 
@@ -176,10 +196,12 @@ vec3 skyReflect(vec3 rd, float time) {
   col = mix(col, SKY_ZENITH, pow(y, 0.4));
   col += vec3(0.02, 0.03, 0.06) * pow(moonDot, 1.5);
 
-  // Moon bloom for reflections
+  // Moon bloom for reflections — stronger near horizon
   float theta = acos(clamp(moonDot, 0.0, 1.0));
-  float bloom = 0.25 * exp(-theta * theta / 0.012) + 0.12 * exp(-theta * theta / 0.05);
-  col += vec3(0.45, 0.55, 0.70) * bloom * 0.7;
+  float bloom = 0.30 * exp(-theta * theta / 0.012) + 0.15 * exp(-theta * theta / 0.05);
+  // Extra wide bloom for horizon reflections
+  bloom += 0.08 * exp(-theta * theta / 0.15);
+  col += vec3(0.45, 0.55, 0.70) * bloom * 0.8;
 
   // Moon disc in reflections (simplified)
   float moonAngle = theta;

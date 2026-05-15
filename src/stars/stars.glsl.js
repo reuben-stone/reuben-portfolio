@@ -16,16 +16,53 @@ void addStar(vec3 rd, vec3 sdir, float mag, float bv, float idx, float time, ino
   if (d < 0.9995) return;
   float ang = acos(clamp(d, 0.0, 1.0));
   // Small, tight points — vary less with magnitude
-  float sz = mix(0.0018, 0.0008, clamp((mag + 1.5) / 5.0, 0.0, 1.0));
+  float sz = mix(0.0020, 0.0010, clamp((mag + 1.5) / 5.0, 0.0, 1.0));
   float g = exp(-ang * ang / (sz * sz));
   // Compressed brightness — all stars clearly visible
-  float b = pow(10.0, -0.12 * mag) * 3.0;
+  float b = max(pow(10.0, -0.09 * mag) * 3.5, 0.15);
   float tw = sin(time * (1.5 + idx * 0.13) + idx * 7.0) * 0.10 + 0.90;
   result += bvToColor(bv) * g * b * tw;
 }
 
+// Procedural dim background stars — fills gaps between catalogue stars
+vec3 backgroundStars(vec3 rd, float time) {
+  vec3 result = vec3(0.0);
+  // Use rd as a seed for a grid of pseudo-random stars
+  // Project onto a sphere grid
+  float phi = atan(rd.z, rd.x);
+  float theta = acos(clamp(rd.y, -1.0, 1.0));
+  // Grid cells — each cell may contain a star
+  float gridScale = 80.0;
+  vec2 cell = vec2(phi, theta) * gridScale;
+  vec2 cellId = floor(cell);
+  vec2 cellUv = fract(cell);
+  // Check this cell and neighbours for stars
+  for (int dx = -1; dx <= 1; dx++) {
+    for (int dy = -1; dy <= 1; dy++) {
+      vec2 neighbor = cellId + vec2(float(dx), float(dy));
+      // Random position within cell
+      vec2 starPos = hash2(neighbor) * 0.8 + 0.1;
+      vec2 diff = (cellUv - starPos) - vec2(float(dx), float(dy));
+      float dist = length(diff) / gridScale;
+      // Random brightness — most are very faint
+      float brightness = hash(neighbor * 1.7 + vec2(3.1, 7.4));
+      brightness = pow(brightness, 3.0) * 0.6; // cube for mostly-faint distribution
+      // Random twinkling
+      float tw = sin(time * (1.0 + hash(neighbor) * 0.5) + hash(neighbor * 2.3) * 6.28) * 0.15 + 0.85;
+      // Point spread — very tight
+      float sz = 0.0004 + brightness * 0.0003;
+      float g = exp(-dist * dist / (sz * sz));
+      // Slight colour variation
+      float colVar = hash(neighbor * 3.1);
+      vec3 col = mix(vec3(0.7, 0.8, 1.0), vec3(1.0, 0.95, 0.85), colVar);
+      result += col * g * brightness * tw;
+    }
+  }
+  return result;
+}
+
 vec3 renderStars(vec3 rd, float time) {
-  vec3 r = vec3(0.0);
+  vec3 r = backgroundStars(rd, time);
   addStar(rd,normalize(vec3(0.2686,0.2876,-0.9193)),-1.4,0.0,0.0,time,r);
   addStar(rd,normalize(vec3(0.1155,0.7954,-0.5949)),-0.6,0.2,1.0,time,r);
   addStar(rd,normalize(vec3(-0.0705,-0.7193,-0.6911)),0.1,0.8,2.0,time,r);
