@@ -4,6 +4,7 @@
  */
 
 import noiseGlsl from "./noise.glsl.js";
+import starsGlsl from "../stars/stars.glsl.js";
 import cloudsGlsl from "../sky/clouds.glsl.js";
 import skyGlsl from "../sky/sky.glsl.js";
 import oceanGlsl from "../ocean/ocean.glsl.js";
@@ -20,6 +21,7 @@ const vec3 DEEP    = vec3(0.02, 0.04, 0.08);
 const vec3 SHALLOW = vec3(0.04, 0.07, 0.14);
 
 ${noiseGlsl}
+${starsGlsl}
 ${cloudsGlsl}
 ${skyGlsl}
 ${oceanGlsl}

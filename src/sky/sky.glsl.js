@@ -100,21 +100,6 @@ vec4 renderMoon(vec3 rd) {
   return vec4(moonCol, edgeAA);
 }
 
-// --- Star field ---
-float starField(vec3 rd, float time) {
-  vec2 cell = floor(rd.xz / max(rd.y, 0.001) * 220.0);
-  float h = hash(cell);
-  if (h > 0.984) {
-    float brightness = (h - 0.984) / 0.016;
-    brightness = pow(brightness, 0.4) * 0.8 + 0.2;
-    float twinkle = sin(time * (1.5 + h * 5.0) + h * 100.0) * 0.3 + 0.7;
-    vec2 f = fract(rd.xz / max(rd.y, 0.001) * 220.0);
-    float d = length(f - vec2(hash(cell + vec2(1.0, 0.0)), hash(cell + vec2(0.0, 1.0))));
-    float point = smoothstep(0.07, 0.0, d);
-    return point * brightness * twinkle;
-  }
-  return 0.0;
-}
 
 vec3 sky(vec3 rd, float time) {
   float y = max(rd.y, 0.0);
@@ -125,25 +110,11 @@ vec3 sky(vec3 rd, float time) {
   col = mix(col, SKY_ZENITH, pow(y, 0.4));
   col += vec3(0.02, 0.03, 0.06) * pow(moonDot, 1.5);
 
-  // --- Stars ---
-  float starMask = smoothstep(0.02, 0.12, y);
-  float moonGlare = 1.0 - smoothstep(0.06, 0.30, acos(clamp(moonDot, 0.0, 1.0)));
+  // --- Real star catalogue (computed here, added after clouds with occlusion) ---
+  float starMask = smoothstep(0.02, 0.10, y);
+  float moonGlare = 1.0 - smoothstep(0.05, 0.25, acos(clamp(moonDot, 0.0, 1.0)));
   starMask *= (1.0 - moonGlare);
-  float stars = starField(rd, time) * starMask;
-  // Hero bright stars — lower threshold, brighter
-  vec2 heroCell = floor(rd.xz / max(rd.y, 0.001) * 80.0);
-  float heroH = hash(heroCell);
-  if (heroH > 0.997) {
-    vec2 hf = fract(rd.xz / max(rd.y, 0.001) * 80.0);
-    float hd = length(hf - vec2(hash(heroCell + vec2(3.0, 7.0)), hash(heroCell + vec2(11.0, 2.0))));
-    float heroStar = smoothstep(0.06, 0.0, hd);
-    float heroTwinkle = sin(time * (1.0 + heroH * 3.0) + heroH * 50.0) * 0.15 + 0.85;
-    stars += heroStar * heroTwinkle * 1.5;
-  }
-  vec2 starCell = floor(rd.xz / max(rd.y, 0.001) * 220.0);
-  float starTemp = hash(starCell + vec2(42.0, 17.0));
-  vec3 starCol = mix(vec3(0.7, 0.8, 1.0), vec3(1.0, 0.95, 0.8), starTemp);
-  col += starCol * stars * 1.0;
+  vec3 starLight = renderStars(rd, time) * starMask;
 
   // --- Moon disc (behind clouds — rendered first) ---
   float moonAngle = acos(clamp(moonDot, 0.0, 1.0));
@@ -181,9 +152,8 @@ vec3 sky(vec3 rd, float time) {
     col = mix(col, cloudResult.rgb, clouds);
   }
 
-  // --- Bright stars peek through thin clouds ---
-  float starThrough = stars * (1.0 - clouds * 0.85) * 0.4;
-  col += starCol * starThrough;
+  // --- Stars dimmed by clouds ---
+  col += starLight * (1.0 - clouds * 0.95);
 
   // --- Wide bloom bleeds through thin clouds ---
   float bloomThrough = 0.0;
