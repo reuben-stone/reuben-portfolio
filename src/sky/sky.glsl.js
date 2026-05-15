@@ -152,8 +152,8 @@ vec3 sky(vec3 rd, float time) {
     col = mix(col, cloudResult.rgb, clouds);
   }
 
-  // --- Stars dimmed by clouds ---
-  col += starLight * (1.0 - clouds * 0.95);
+  // --- Stars dimmed by clouds (alpha-based occlusion) ---
+  col += starLight * pow(1.0 - clouds, 3.0);
 
   // --- Wide bloom bleeds through thin clouds ---
   float bloomThrough = 0.0;

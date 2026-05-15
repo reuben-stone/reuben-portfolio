@@ -16,7 +16,7 @@ const vec3 MOON_COLOR  = vec3(0.70, 0.80, 0.95);
 // Per-layer density — each layer has distinct character
 float cloudDensityL0(vec2 uv, float time) {
   // Distant bank — broken cumulus masses near horizon
-  vec2 drift = vec2(time * 0.8, time * 0.2);
+  vec2 drift = vec2(time * 20.0, time * 5.0);
   vec2 p = (uv + drift) * 0.00012;
   float d = fbm(p);
   float patchMask = noise(p * 0.5 + vec2(3.1, 7.4));
@@ -26,7 +26,7 @@ float cloudDensityL0(vec2 uv, float time) {
 
 float cloudDensityL1(vec2 uv, float time) {
   // Low cumulus — hero layer. Dramatic masses with strong silhouettes.
-  vec2 drift = vec2(time * 2.0, time * 0.5);
+  vec2 drift = vec2(time * 50.0, time * 12.5);
   vec2 p = (uv + drift) * 0.00022;
   // Strong double domain warp for dramatic, organic shapes
   vec2 warp1 = vec2(fbm(p + vec2(1.7, 9.2)), fbm(p + vec2(8.3, 2.8)));
@@ -39,7 +39,7 @@ float cloudDensityL1(vec2 uv, float time) {
   float ridge = ridgeFBM(p * 1.3 + vec2(3.7, 1.2));
   float d = mix(base, ridge, 0.45);
   // Coverage mask — distinct masses with clear gaps
-  float coverage = fbm((uv + drift * 0.25) * 0.00007);
+  float coverage = fbm((uv + drift * 0.3) * 0.00007);
   d *= smoothstep(0.28, 0.50, coverage);
   // Moon clearing — dramatic gap around moon
   vec2 moonXZ = normalize(MOON_DIR.xz);
@@ -50,7 +50,7 @@ float cloudDensityL1(vec2 uv, float time) {
 
 float cloudDensityL2(vec2 uv, float time) {
   // Mid cumulus — broken, scattered.
-  vec2 drift = vec2(time * 4.0, time * 1.2);
+  vec2 drift = vec2(time * 100.0, time * 30.0);
   vec2 p = (uv + drift) * 0.00032;
   p += curlNoise(p * 600.0) * 0.0005;
   vec2 warp = vec2(noise(p * 1.5 + vec2(4.1, 2.3)), noise(p * 1.5 + vec2(7.8, 3.1)));
@@ -67,7 +67,7 @@ float cloudDensityL2(vec2 uv, float time) {
 
 float cloudDensityL3(vec2 uv, float time) {
   // High altocumulus — thinner, slightly stretched
-  vec2 drift = vec2(time * 7.0, time * 2.0);
+  vec2 drift = vec2(time * 175.0, time * 50.0);
   vec2 p = (uv + drift) * 0.0004;
   p.x *= 0.75;
   float d = fbm(p);
@@ -79,7 +79,7 @@ float cloudDensityL3(vec2 uv, float time) {
 
 float cloudDensityL4(vec2 uv, float time) {
   // Cirrus wisps — anisotropic, thin streaks
-  vec2 drift = vec2(time * 12.0, time * 3.0);
+  vec2 drift = vec2(time * 300.0, time * 75.0);
   vec2 p = (uv + drift) * 0.0003;
   p = vec2(p.x * 0.5, p.y * 2.0);
   float d = ridgeFBM(p);
@@ -213,7 +213,7 @@ vec4 cloudReflectApprox(vec3 rd, float time) {
   float t1 = (800.0 - 10.0) / rd.y;
   if (t1 > 0.0) {
     vec2 uv = (vec3(0.0, 10.0, 0.0) + rd * t1).xz;
-    vec2 p = (uv + vec2(time * 2.0, time * 0.5)) * 0.00025;
+    vec2 p = (uv + vec2(time * 50.0, time * 12.5)) * 0.00025;
     float d = smoothstep(0.35, 0.43, fbm(p));
     if (d > 0.01) {
       vec3 col = mix(vec3(0.03, 0.04, 0.07), MOON_COLOR * 0.8 * phase, 0.3);
@@ -227,7 +227,7 @@ vec4 cloudReflectApprox(vec3 rd, float time) {
   float t2 = (1400.0 - 10.0) / rd.y;
   if (t2 > 0.0) {
     vec2 uv = (vec3(0.0, 10.0, 0.0) + rd * t2).xz;
-    vec2 p = (uv + vec2(time * 4.0, time * 1.2)) * 0.00035;
+    vec2 p = (uv + vec2(time * 100.0, time * 30.0)) * 0.00035;
     float d = smoothstep(0.36, 0.44, fbm(p));
     if (d > 0.01) {
       vec3 col = mix(vec3(0.03, 0.04, 0.07), MOON_COLOR * 0.6 * phase, 0.4);

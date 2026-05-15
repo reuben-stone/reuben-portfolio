@@ -18,8 +18,8 @@ void addStar(vec3 rd, vec3 sdir, float mag, float bv, float idx, float time, ino
   // Small, tight points — vary less with magnitude
   float sz = mix(0.0018, 0.0008, clamp((mag + 1.5) / 5.0, 0.0, 1.0));
   float g = exp(-ang * ang / (sz * sz));
-  // Compressed brightness — dim stars clearly visible
-  float b = pow(10.0, -0.15 * mag) * 2.0;
+  // Compressed brightness — all stars clearly visible
+  float b = pow(10.0, -0.12 * mag) * 3.0;
   float tw = sin(time * (1.5 + idx * 0.13) + idx * 7.0) * 0.10 + 0.90;
   result += bvToColor(bv) * g * b * tw;
 }
