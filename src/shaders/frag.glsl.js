@@ -14,7 +14,7 @@ uniform vec2 uResolution;
 
 varying vec2 vUv;
 
-const vec3 SUN_DIR = normalize(vec3(0.0, 0.12, -1.0));
+const vec3 SUN_DIR = normalize(vec3(0.35, 0.12, -1.0));
 const vec3 DEEP    = vec3(0.02, 0.07, 0.18);
 const vec3 SHALLOW = vec3(0.07, 0.20, 0.32);
 const vec3 WARM_SHALLOW = vec3(0.16, 0.18, 0.10);
@@ -37,8 +37,8 @@ void main() {
   float pitch = sin(sway * 0.5 + 1.0) * pitchAmt + sin(sway * 0.9) * pitchAmt * 0.4;
   float heave = sin(sway * 0.6 + 0.5) * heaveAmt + sin(sway * 1.0) * heaveAmt * 0.3;
 
-  vec3 ro = vec3(0.0, 8.0 + heave, 0.0);
-  vec3 target = vec3(0.0, 2.0, -40.0);
+  vec3 ro = vec3(0.0, 10.0 + heave, 0.0);
+  vec3 target = vec3(2.0, 6.0, -40.0);
   vec3 fwd = normalize(target - ro);
   vec3 right = normalize(cross(fwd, vec3(0.0, 1.0, 0.0)));
   vec3 up = cross(right, fwd);
@@ -48,9 +48,11 @@ void main() {
 
   vec3 col = sky(rd, uTime);
 
-  // Ray-ocean intersection
-  if (rd.y < -0.001) {
-    float t = -ro.y / rd.y;
+  // Ray-ocean intersection — soft horizon blend
+  float horizonBlend = smoothstep(0.006, -0.006, rd.y);
+  if (rd.y < 0.006) {
+    float safeRdY = min(rd.y, -0.0001);
+    float t = -ro.y / safeRdY;
     vec3 hit = ro + rd * t;
 
     float dist = length(hit.xz);
@@ -118,11 +120,12 @@ void main() {
     water = mix(water, foamCol, foam * 0.35);
 
     // Horizon fog — smooth blend to sky
-    float fog = smoothstep(35.0, 130.0, dist);
-    vec3 horizonSky = sky(normalize(vec3(rd.x, 0.001, rd.z)), uTime);
+    // Sample sky at the actual ray direction for a seamless merge
+    float fog = smoothstep(30.0, 100.0, dist);
+    vec3 horizonSky = sky(normalize(vec3(rd.x, max(rd.y, 0.0) + 0.005, rd.z)), uTime);
     water = mix(water, horizonSky, fog);
 
-    col = water;
+    col = mix(col, water, horizonBlend);
   }
 
   // Post — tone map, contrast, warm tint, vignette, film grain, CA

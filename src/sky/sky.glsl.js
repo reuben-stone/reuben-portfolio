@@ -1,6 +1,7 @@
 /**
- * Sky rendering — rich golden hour atmosphere.
- * Warm layered horizon, Rayleigh-inspired scattering, volumetric clouds.
+ * Sky rendering — Turner-esque golden hour atmosphere.
+ * Physically-inspired scattering, painterly sun with limb darkening,
+ * concentric colour rings, veiling luminance, volumetric clouds.
  */
 
 export default /* glsl */ `
@@ -28,19 +29,63 @@ vec3 sky(vec3 rd, float time) {
   col += vec3(1.0, 0.6, 0.25) * mie;
 
   // --- Sun ---
-  // Wide atmospheric golden wash
-  col += SUN_COLOR * pow(sunDot, 2.0) * 0.45;
-  col += vec3(1.0, 0.60, 0.30) * pow(sunDot, 5.0) * 0.35;
-  // Inner halo — golden, not white
-  col += SUN_COLOR * pow(sunDot, 20.0) * 0.6;
-  // Disc — soft golden edge
-  float sunAngle = acos(sunDot);
+  float sunAngle = acos(clamp(sunDot, 0.0, 1.0));
   float discRadius = 0.045;
-  float disc = 1.0 - smoothstep(discRadius * 0.5, discRadius, sunAngle);
-  // Golden core, not pure white
-  vec3 sunDisc = mix(vec3(1.0, 0.85, 0.55), vec3(1.0, 0.95, 0.80), disc);
-  col += sunDisc * disc * 2.8;
-  col += vec3(1.0, 0.90, 0.65) * disc * disc * 1.8;
+
+  // Painterly edge dissolution — noise-perturbed disc radius
+  float edgeTheta = atan(rd.y - SUN_DIR.y, rd.x - SUN_DIR.x);
+  float edgeNoise = fbm(vec2(edgeTheta * 2.0, sunAngle * 30.0) + time * 0.01);
+  float noisyRadius = discRadius * (0.85 + edgeNoise * 0.3);
+  float disc = 1.0 - smoothstep(noisyRadius * 0.4, noisyRadius, sunAngle);
+
+  // Limb darkening — Neckel & Labs model
+  // mu = 1.0 at centre, 0.0 at edge
+  float mu = clamp(disc, 0.0, 1.0);
+  vec3 limbDarkening = vec3(
+    0.3 + 0.93 * mu - 0.23 * mu * mu,
+    0.1 + 0.70 * mu + 0.20 * mu * mu,
+    -0.1 + 0.56 * mu + 0.54 * mu * mu
+  );
+  limbDarkening = max(limbDarkening, 0.0);
+
+  // Sun disc — golden core with limb darkening
+  vec3 sunDisc = mix(vec3(1.0, 0.85, 0.55), vec3(1.0, 0.95, 0.85), mu);
+  sunDisc *= limbDarkening;
+  col += sunDisc * disc * 3.0;
+  // Hot inner core
+  float innerDisc = 1.0 - smoothstep(noisyRadius * 0.15, noisyRadius * 0.5, sunAngle);
+  col += vec3(1.0, 0.93, 0.7) * innerDisc * 1.5;
+
+  // Analytical Gaussian bloom — multi-scale, replaces pow(sunDot, N) halos
+  float theta = sunAngle;
+  float bloom = 0.0;
+  bloom += 0.45 * exp(-theta * theta / 0.004);   // tight core glow
+  bloom += 0.30 * exp(-theta * theta / 0.02);    // medium spread
+  bloom += 0.18 * exp(-theta * theta / 0.10);    // wide atmospheric wash
+  bloom += 0.07 * exp(-theta * theta / 0.40);    // very wide subtle haze
+
+  // Bloom colour shifts from white-gold at centre to warm amber at edge
+  vec3 bloomColor = mix(vec3(1.0, 0.65, 0.30), vec3(1.0, 0.93, 0.80),
+                        exp(-theta * 6.0));
+  col += bloomColor * bloom * 1.4;
+
+  // Turner concentric colour rings — banded palette radiating from sun
+  float sunInfluence = 1.0 - smoothstep(0.0, 0.55, sunAngle);
+  vec3 turnerCore   = vec3(1.0, 0.98, 0.92);   // near-white warm
+  vec3 turnerYellow = vec3(1.0, 0.88, 0.45);   // cadmium yellow
+  vec3 turnerGold   = vec3(1.0, 0.70, 0.25);   // rich gold
+  vec3 turnerOrange = vec3(0.95, 0.50, 0.18);  // warm orange
+  vec3 turnerSalmon = vec3(0.85, 0.45, 0.30);  // salmon/atmosphere
+
+  float t = sunInfluence;
+  vec3 turnerGlow = turnerSalmon;
+  turnerGlow = mix(turnerGlow, turnerOrange, smoothstep(0.0, 0.25, t));
+  turnerGlow = mix(turnerGlow, turnerGold,   smoothstep(0.25, 0.5, t));
+  turnerGlow = mix(turnerGlow, turnerYellow, smoothstep(0.5, 0.75, t));
+  turnerGlow = mix(turnerGlow, turnerCore,   smoothstep(0.75, 1.0, t));
+
+  float turnerIntensity = pow(sunInfluence, 1.5) * 0.7;
+  col += turnerGlow * turnerIntensity;
 
   // --- Horizon atmosphere ---
   float haze = pow(1.0 - y, 4.0);
@@ -48,9 +93,6 @@ vec3 sky(vec3 rd, float time) {
   col = mix(col, horizonGlow, haze * 0.5);
   // Sun-facing warm intensification
   col += vec3(1.0, 0.50, 0.20) * haze * pow(sunDot, 1.5) * 0.35;
-  // Thin bright horizon line
-  float horizonLine = pow(1.0 - y, 25.0);
-  col += vec3(0.95, 0.65, 0.38) * horizonLine * 0.3;
   // Cool blue tint away from sun at horizon
   float awayFromSun = 1.0 - pow(sunDot, 0.4);
   col = mix(col, vec3(0.30, 0.35, 0.50), haze * awayFromSun * 0.25);
@@ -90,6 +132,13 @@ vec3 sky(vec3 rd, float time) {
   cloudCol += SUN_COLOR * edgeGlow * pow(sunDot, 2.0) * 0.15;
 
   col = mix(col, cloudCol, clouds * 0.45);
+
+  // --- Veiling luminance ---
+  // Light overwhelms form near the sun — Turner's key effect.
+  // Applied last so it bleeds over clouds, sky gradient, everything.
+  float veil = pow(sunDot, 4.0);
+  vec3 veilColor = mix(vec3(1.0, 0.75, 0.40), vec3(1.0, 0.95, 0.85), veil);
+  col = mix(col, veilColor, veil * 0.35);
 
   return col;
 }
