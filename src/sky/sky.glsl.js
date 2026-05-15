@@ -1,145 +1,226 @@
 /**
- * Sky rendering — Turner-esque golden hour atmosphere.
- * Physically-inspired scattering, painterly sun with limb darkening,
- * concentric colour rings, veiling luminance, volumetric clouds.
+ * Sky rendering — moonlit night atmosphere.
+ * Realistic moon with surface detail, twinkling stars, layered clouds.
  */
 
 export default /* glsl */ `
-const vec3 SKY_ZENITH  = vec3(0.15, 0.22, 0.48);
-const vec3 SKY_MID     = vec3(0.40, 0.35, 0.45);
-const vec3 SKY_HORIZON = vec3(0.85, 0.55, 0.35);
-const vec3 SUN_COLOR   = vec3(1.0, 0.75, 0.45);
+
+// --- Moon surface rendering ---
+// Maria (dark plains) via domain-warped noise — strong contrast
+float moonMaria(vec3 n) {
+  // Double domain warp for organic, non-circular maria shapes
+  vec3 warp1 = vec3(
+    noise3D(n * 1.5 + vec3(5.2, 1.3, 2.8)),
+    noise3D(n * 1.5 + vec3(1.7, 9.2, 3.1)),
+    noise3D(n * 1.5 + vec3(8.3, 2.8, 4.7))
+  );
+  vec3 warp2 = vec3(
+    noise3D((n + warp1 * 0.35) * 1.8 + vec3(3.1, 7.4, 1.2)),
+    noise3D((n + warp1 * 0.35) * 1.8 + vec3(6.5, 2.1, 8.3)),
+    noise3D((n + warp1 * 0.35) * 1.8 + vec3(1.8, 5.7, 3.9))
+  );
+  float m = noise3D((n + warp2 * 0.25) * 2.0);
+  // Sharp threshold for distinct maria/highland boundary
+  return smoothstep(0.32, 0.48, m);
+}
+
+// Moon surface detail — multi-scale craters + texture
+float moonDetail(vec3 n) {
+  float c = 0.0;
+  // Large impact basins
+  float large = noise3D(n * 4.0);
+  c += smoothstep(0.0, 0.20, large) * 0.35;
+  // Medium craters — with rim brightening
+  float med = noise3D(n * 10.0);
+  float medCrater = smoothstep(0.0, 0.12, med);
+  float medRim = smoothstep(0.12, 0.15, med) * smoothstep(0.20, 0.15, med);
+  c += medCrater * 0.25 + medRim * 0.3;
+  // Small craters
+  c += smoothstep(0.0, 0.12, noise3D(n * 25.0)) * 0.15;
+  // Fine regolith texture
+  c += smoothstep(0.0, 0.15, noise3D(n * 55.0)) * 0.06;
+  c += noise3D(n * 100.0) * 0.03;
+  return c;
+}
+
+// Render the moon disc — returns vec4(rgb, alpha)
+vec4 renderMoon(vec3 rd) {
+  vec3 moonDir = normalize(MOON_DIR);
+  float moonAngle = acos(clamp(dot(rd, moonDir), 0.0, 1.0));
+  float discRadius = 0.030;
+
+  if (moonAngle > discRadius * 1.5) return vec4(0.0);
+
+  // Project onto moon sphere
+  vec3 up = normalize(cross(moonDir, vec3(0.0, 0.0, 1.0)));
+  vec3 right = normalize(cross(up, moonDir));
+  float px = dot(rd - moonDir, right);
+  float py = dot(rd - moonDir, up);
+  float nr = length(vec2(px, py)) / discRadius;
+  if (nr > 1.0) return vec4(0.0);
+
+  float nz = sqrt(1.0 - nr * nr);
+  vec3 sphereN = normalize(right * px / discRadius + up * py / discRadius + moonDir * nz);
+
+  // Surface albedo — maria + highlands with strong contrast
+  float maria = moonMaria(sphereN * 2.5);
+  vec3 highlandCol = vec3(1.10, 1.07, 1.00); // bright warm highlands
+  vec3 mariaCol = vec3(0.45, 0.44, 0.42);     // dark grey maria
+  vec3 baseCol = mix(highlandCol, mariaCol, maria);
+
+  // Multi-scale crater detail
+  float detail = moonDetail(sphereN);
+  baseCol *= 0.70 + detail * 0.55;
+
+  // Bump normals — stronger for visible surface relief
+  float eps = 0.004;
+  float bumpStr = 0.22;
+  vec3 grad = vec3(
+    noise3D(sphereN * 18.0 + vec3(eps, 0.0, 0.0)) - noise3D(sphereN * 18.0 - vec3(eps, 0.0, 0.0)),
+    noise3D(sphereN * 18.0 + vec3(0.0, eps, 0.0)) - noise3D(sphereN * 18.0 - vec3(0.0, eps, 0.0)),
+    noise3D(sphereN * 18.0 + vec3(0.0, 0.0, eps)) - noise3D(sphereN * 18.0 - vec3(0.0, 0.0, eps))
+  ) / (2.0 * eps);
+  // Add medium-scale bump
+  grad += 0.5 * vec3(
+    noise3D(sphereN * 40.0 + vec3(eps, 0.0, 0.0)) - noise3D(sphereN * 40.0 - vec3(eps, 0.0, 0.0)),
+    noise3D(sphereN * 40.0 + vec3(0.0, eps, 0.0)) - noise3D(sphereN * 40.0 - vec3(0.0, eps, 0.0)),
+    noise3D(sphereN * 40.0 + vec3(0.0, 0.0, eps)) - noise3D(sphereN * 40.0 - vec3(0.0, 0.0, eps))
+  ) / (2.0 * eps);
+  vec3 bumpN = normalize(sphereN + bumpStr * grad);
+
+  // Full moon lighting — opposition surge (nearly uniform, slight edge falloff)
+  float cosNV = max(dot(bumpN, -rd), 0.0);
+  float brightness = 0.95 - 0.05 * pow(1.0 - cosNV, 3.0);
+
+  // Extra brightness — moon should be clearly the brightest object
+  vec3 moonCol = baseCol * brightness * 1.6;
+
+  // Anti-aliased edge
+  float edgeAA = smoothstep(1.0, 0.94, nr);
+  return vec4(moonCol, edgeAA);
+}
+
+// --- Star field ---
+float starField(vec3 rd, float time) {
+  vec2 cell = floor(rd.xz / max(rd.y, 0.001) * 220.0);
+  float h = hash(cell);
+  if (h > 0.984) {
+    float brightness = (h - 0.984) / 0.016;
+    brightness = pow(brightness, 0.4) * 0.8 + 0.2;
+    float twinkle = sin(time * (1.5 + h * 5.0) + h * 100.0) * 0.3 + 0.7;
+    vec2 f = fract(rd.xz / max(rd.y, 0.001) * 220.0);
+    float d = length(f - vec2(hash(cell + vec2(1.0, 0.0)), hash(cell + vec2(0.0, 1.0))));
+    float point = smoothstep(0.07, 0.0, d);
+    return point * brightness * twinkle;
+  }
+  return 0.0;
+}
 
 vec3 sky(vec3 rd, float time) {
   float y = max(rd.y, 0.0);
+  float moonDot = max(dot(rd, MOON_DIR), 0.0);
 
-  // Atmospheric gradient — Rayleigh-inspired colour shift
-  float sunDot = max(dot(rd, SUN_DIR), 0.0);
+  // Night sky gradient
+  vec3 col = mix(SKY_HORIZON, SKY_MID, pow(y, 0.12));
+  col = mix(col, SKY_ZENITH, pow(y, 0.4));
+  col += vec3(0.02, 0.03, 0.06) * pow(moonDot, 1.5);
 
-  // Base gradient with more colour separation
-  vec3 col = mix(SKY_HORIZON, SKY_MID, pow(y, 0.15));
-  col = mix(col, SKY_ZENITH, pow(y, 0.5));
+  // --- Stars ---
+  float starMask = smoothstep(0.02, 0.12, y);
+  float moonGlare = 1.0 - smoothstep(0.06, 0.30, acos(clamp(moonDot, 0.0, 1.0)));
+  starMask *= (1.0 - moonGlare);
+  float stars = starField(rd, time) * starMask;
+  // Hero bright stars — lower threshold, brighter
+  vec2 heroCell = floor(rd.xz / max(rd.y, 0.001) * 80.0);
+  float heroH = hash(heroCell);
+  if (heroH > 0.997) {
+    vec2 hf = fract(rd.xz / max(rd.y, 0.001) * 80.0);
+    float hd = length(hf - vec2(hash(heroCell + vec2(3.0, 7.0)), hash(heroCell + vec2(11.0, 2.0))));
+    float heroStar = smoothstep(0.06, 0.0, hd);
+    float heroTwinkle = sin(time * (1.0 + heroH * 3.0) + heroH * 50.0) * 0.15 + 0.85;
+    stars += heroStar * heroTwinkle * 1.5;
+  }
+  vec2 starCell = floor(rd.xz / max(rd.y, 0.001) * 220.0);
+  float starTemp = hash(starCell + vec2(42.0, 17.0));
+  vec3 starCol = mix(vec3(0.7, 0.8, 1.0), vec3(1.0, 0.95, 0.8), starTemp);
+  col += starCol * stars * 1.0;
 
-  // Rayleigh-like scattering — blue away from sun, warm toward
-  float scatter = pow(1.0 - sunDot, 2.0);
-  col = mix(col, vec3(0.18, 0.25, 0.52), scatter * pow(y, 0.3) * 0.3);
+  // --- Moon disc (behind clouds — rendered first) ---
+  float moonAngle = acos(clamp(moonDot, 0.0, 1.0));
+  vec4 moon = renderMoon(rd);
+  if (moon.a > 0.0) {
+    col = mix(col, moon.rgb, moon.a);
+  }
 
-  // Mie-like forward scattering — warm glow around sun
-  float mie = pow(sunDot, 8.0) * 0.3;
-  col += vec3(1.0, 0.6, 0.25) * mie;
-
-  // --- Sun ---
-  float sunAngle = acos(clamp(sunDot, 0.0, 1.0));
-  float discRadius = 0.045;
-
-  // Painterly edge dissolution — noise-perturbed disc radius
-  float edgeTheta = atan(rd.y - SUN_DIR.y, rd.x - SUN_DIR.x);
-  float edgeNoise = fbm(vec2(edgeTheta * 2.0, sunAngle * 30.0) + time * 0.01);
-  float noisyRadius = discRadius * (0.85 + edgeNoise * 0.3);
-  float disc = 1.0 - smoothstep(noisyRadius * 0.4, noisyRadius, sunAngle);
-
-  // Limb darkening — Neckel & Labs model
-  // mu = 1.0 at centre, 0.0 at edge
-  float mu = clamp(disc, 0.0, 1.0);
-  vec3 limbDarkening = vec3(
-    0.3 + 0.93 * mu - 0.23 * mu * mu,
-    0.1 + 0.70 * mu + 0.20 * mu * mu,
-    -0.1 + 0.56 * mu + 0.54 * mu * mu
-  );
-  limbDarkening = max(limbDarkening, 0.0);
-
-  // Sun disc — golden core with limb darkening
-  vec3 sunDisc = mix(vec3(1.0, 0.85, 0.55), vec3(1.0, 0.95, 0.85), mu);
-  sunDisc *= limbDarkening;
-  col += sunDisc * disc * 3.0;
-  // Hot inner core
-  float innerDisc = 1.0 - smoothstep(noisyRadius * 0.15, noisyRadius * 0.5, sunAngle);
-  col += vec3(1.0, 0.93, 0.7) * innerDisc * 1.5;
-
-  // Analytical Gaussian bloom — multi-scale, replaces pow(sunDot, N) halos
-  float theta = sunAngle;
+  // --- Moon bloom (also behind clouds, but wide bloom bleeds through) ---
+  float theta = moonAngle;
   float bloom = 0.0;
-  bloom += 0.45 * exp(-theta * theta / 0.004);   // tight core glow
-  bloom += 0.30 * exp(-theta * theta / 0.02);    // medium spread
-  bloom += 0.18 * exp(-theta * theta / 0.10);    // wide atmospheric wash
-  bloom += 0.07 * exp(-theta * theta / 0.40);    // very wide subtle haze
+  bloom += 0.50 * exp(-theta * theta / 0.002);
+  bloom += 0.30 * exp(-theta * theta / 0.010);
+  bloom += 0.15 * exp(-theta * theta / 0.04);
+  bloom += 0.06 * exp(-theta * theta / 0.15);
+  col += vec3(0.50, 0.60, 0.75) * bloom * 1.2;
 
-  // Bloom colour shifts from white-gold at centre to warm amber at edge
-  vec3 bloomColor = mix(vec3(1.0, 0.65, 0.30), vec3(1.0, 0.93, 0.80),
-                        exp(-theta * 6.0));
-  col += bloomColor * bloom * 1.4;
-
-  // Turner concentric colour rings — banded palette radiating from sun
-  float sunInfluence = 1.0 - smoothstep(0.0, 0.55, sunAngle);
-  vec3 turnerCore   = vec3(1.0, 0.98, 0.92);   // near-white warm
-  vec3 turnerYellow = vec3(1.0, 0.88, 0.45);   // cadmium yellow
-  vec3 turnerGold   = vec3(1.0, 0.70, 0.25);   // rich gold
-  vec3 turnerOrange = vec3(0.95, 0.50, 0.18);  // warm orange
-  vec3 turnerSalmon = vec3(0.85, 0.45, 0.30);  // salmon/atmosphere
-
-  float t = sunInfluence;
-  vec3 turnerGlow = turnerSalmon;
-  turnerGlow = mix(turnerGlow, turnerOrange, smoothstep(0.0, 0.25, t));
-  turnerGlow = mix(turnerGlow, turnerGold,   smoothstep(0.25, 0.5, t));
-  turnerGlow = mix(turnerGlow, turnerYellow, smoothstep(0.5, 0.75, t));
-  turnerGlow = mix(turnerGlow, turnerCore,   smoothstep(0.75, 1.0, t));
-
-  float turnerIntensity = pow(sunInfluence, 1.5) * 0.7;
-  col += turnerGlow * turnerIntensity;
+  // Lunar corona
+  float coronaDeg = theta * 57.2958;
+  float corona = exp(-(coronaDeg - 2.0) * (coronaDeg - 2.0) / 1.0) * 0.15;
+  col += vec3(0.50, 0.58, 0.70) * corona;
 
   // --- Horizon atmosphere ---
-  float haze = pow(1.0 - y, 4.0);
-  vec3 horizonGlow = mix(vec3(0.65, 0.45, 0.35), SKY_HORIZON * 1.2, pow(sunDot, 0.5));
-  col = mix(col, horizonGlow, haze * 0.5);
-  // Sun-facing warm intensification
-  col += vec3(1.0, 0.50, 0.20) * haze * pow(sunDot, 1.5) * 0.35;
-  // Cool blue tint away from sun at horizon
-  float awayFromSun = 1.0 - pow(sunDot, 0.4);
-  col = mix(col, vec3(0.30, 0.35, 0.50), haze * awayFromSun * 0.25);
+  float horizonFade = smoothstep(0.10, 0.0, y);
+  col = mix(col, SKY_HORIZON * 1.3, horizonFade * 0.18);
 
-  // --- Clouds ---
-  vec2 cloudUV = rd.xz / (rd.y + 0.15) * 2.5;
-  float skyMask = smoothstep(0.0, 0.12, y);
+  // --- Theatrical layered-plane clouds (in front of moon) ---
+  vec4 cloudResult = vec4(0.0);
+  float clouds = 0.0;
+  if (y > 0.02) {
+    vec3 cloudRo = vec3(0.0, 10.0, 0.0);
+    cloudResult = cloudLayers(cloudRo, rd, time);
+    float horizonCloudFade = smoothstep(0.02, 0.08, y);
+    clouds = cloudResult.a * horizonCloudFade;
+    col = mix(col, cloudResult.rgb, clouds);
+  }
 
-  // Layer 1 — broad cloud masses
-  float cloud1 = fbm(cloudUV * 0.6 + vec2(time * 0.010, time * 0.005));
-  cloud1 = smoothstep(0.35, 0.68, cloud1);
+  // --- Bright stars peek through thin clouds ---
+  float starThrough = stars * (1.0 - clouds * 0.85) * 0.4;
+  col += starCol * starThrough;
 
-  // Layer 2 — wispy detail
-  float cloud2 = fbm(cloudUV * 1.4 + vec2(-time * 0.015, time * 0.008));
-  cloud2 = smoothstep(0.40, 0.70, cloud2);
+  // --- Wide bloom bleeds through thin clouds ---
+  float bloomThrough = 0.0;
+  bloomThrough += 0.10 * exp(-theta * theta / 0.04);
+  bloomThrough += 0.04 * exp(-theta * theta / 0.12);
+  col += vec3(0.45, 0.55, 0.70) * bloomThrough * (0.3 + 0.7 * (1.0 - clouds));
 
-  // Layer 3 — high altitude cirrus
-  float cloud3 = fbm(cloudUV * 2.8 + vec2(time * 0.020, -time * 0.005));
-  cloud3 = smoothstep(0.48, 0.75, cloud3);
+  // --- Veiling luminance (subtle) ---
+  float veil = pow(moonDot, 5.0);
+  col = mix(col, vec3(0.18, 0.22, 0.32), veil * 0.08);
 
-  float clouds = cloud1 * 0.55 + cloud2 * 0.30 + cloud3 * 0.15;
-  clouds *= skyMask;
+  return max(col, vec3(0.0));
+}
 
-  // Cloud lighting — warm golden tops, muted purple-blue shadows
-  vec3 cloudBright = mix(SKY_HORIZON * 1.1, SUN_COLOR * 1.4, pow(sunDot, 0.8) * 0.6 + 0.3);
-  vec3 cloudShadow = vec3(0.30, 0.26, 0.32);
-  float cloudLight = pow(sunDot, 0.5) * 0.4 + 0.35;
-  // Self-shadowing via cloud density
-  float cloudDepth = cloud1 * 0.6 + cloud2 * 0.4;
-  cloudLight -= cloudDepth * 0.2;
-  // Edge glow (silver lining)
-  float edgeGlow = pow(clouds * (1.0 - clouds) * 4.0, 0.7);
-  cloudLight += edgeGlow * pow(sunDot, 1.0) * 0.3;
-  cloudLight += y * 0.12;
-  vec3 cloudCol = mix(cloudShadow, cloudBright, clamp(cloudLight, 0.0, 1.0));
-  // Warm rim light on sun-facing edges
-  cloudCol += SUN_COLOR * edgeGlow * pow(sunDot, 2.0) * 0.15;
+// Lightweight sky for ocean reflections
+vec3 skyReflect(vec3 rd, float time) {
+  float y = max(rd.y, 0.0);
+  float moonDot = max(dot(rd, MOON_DIR), 0.0);
+  vec3 col = mix(SKY_HORIZON, SKY_MID, pow(y, 0.12));
+  col = mix(col, SKY_ZENITH, pow(y, 0.4));
+  col += vec3(0.02, 0.03, 0.06) * pow(moonDot, 1.5);
 
-  col = mix(col, cloudCol, clouds * 0.45);
+  // Moon bloom for reflections
+  float theta = acos(clamp(moonDot, 0.0, 1.0));
+  float bloom = 0.25 * exp(-theta * theta / 0.012) + 0.12 * exp(-theta * theta / 0.05);
+  col += vec3(0.45, 0.55, 0.70) * bloom * 0.7;
 
-  // --- Veiling luminance ---
-  // Light overwhelms form near the sun — Turner's key effect.
-  // Applied last so it bleeds over clouds, sky gradient, everything.
-  float veil = pow(sunDot, 4.0);
-  vec3 veilColor = mix(vec3(1.0, 0.75, 0.40), vec3(1.0, 0.95, 0.85), veil);
-  col = mix(col, veilColor, veil * 0.35);
+  // Moon disc in reflections (simplified)
+  float moonAngle = theta;
+  float discRadius = 0.028;
+  float disc = 1.0 - smoothstep(discRadius * 0.85, discRadius, moonAngle);
+  col += vec3(0.85, 0.83, 0.78) * disc * 1.0;
 
-  return col;
+  // Cloud reflection approximation
+  vec4 reflCloud = cloudReflectApprox(rd, time);
+  col = mix(col, reflCloud.rgb, reflCloud.a * 0.4);
+
+  return max(col, vec3(0.0));
 }
 `;
